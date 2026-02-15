@@ -1,0 +1,9 @@
+/build/
+/out/
+/.cache/
+*.log
+*.db
+*.sqlite
+*.swp
+.vscode/
+.DS_Store

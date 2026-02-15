@@ -29,6 +29,22 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
 cmake --build build -j
 ```
 
+## Local openwemo integration
+By default, the project builds without linking `openwemo-bridge-core`.
+
+Enable real engine control APIs:
+```bash
+cmake -S . -B build \
+  -DCMAKE_BUILD_TYPE=Debug \
+  -DWEMO_BRIDGE_USE_OPENWEMO_CORE=ON \
+  -DOPENWEMO_BRIDGE_CORE_ROOT=/home/harry/wemo-matter/openwemo-bridge-core
+cmake --build build -j
+```
+
+Runtime DB paths can be overridden with:
+- `WEMO_DEVICE_DB_PATH`
+- `WEMO_STATE_DB_PATH`
+
 ## Notes
 - Keep CHIP-core patches minimal and upstreamable.
 - Keep bridge-specific logic in this repo.

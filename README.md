@@ -45,6 +45,17 @@ Runtime DB paths can be overridden with:
 - `WEMO_DEVICE_DB_PATH`
 - `WEMO_STATE_DB_PATH`
 
+## Smoke CLI
+```bash
+# list discovered devices and endpoint assignments
+./build-openwemo/wemo-bridge-app list
+
+# control by UDN
+./build-openwemo/wemo-bridge-app set-on <udn>
+./build-openwemo/wemo-bridge-app set-off <udn>
+./build-openwemo/wemo-bridge-app set-level <udn> <0-100>
+```
+
 ## Notes
 - Keep CHIP-core patches minimal and upstreamable.
 - Keep bridge-specific logic in this repo.

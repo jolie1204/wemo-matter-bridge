@@ -1,0 +1,33 @@
+import("//build_overrides/chip.gni")
+import("${chip_root}/build/chip/tools.gni")
+
+assert(chip_build_tools)
+
+executable("wemo-bridge-app") {
+  sources = [
+    "${chip_root}/examples/bridge-app/bridge-common/include/CHIPProjectAppConfig.h",
+    "${chip_root}/examples/bridge-app/linux/bridged-actions-stub.cpp",
+    "${chip_root}/examples/bridge-app/linux/Device.cpp",
+    "${chip_root}/examples/bridge-app/linux/include/Device.h",
+    "${chip_root}/examples/bridge-app/linux/include/main.h",
+    "${chip_root}/examples/bridge-app/linux/main.cpp",
+  ]
+
+  deps = [
+    "${chip_root}/examples/bridge-app/bridge-common",
+    "${chip_root}/examples/platform/linux:app-main",
+    "${chip_root}/src/lib",
+  ]
+
+  cflags = [ "-Wconversion" ]
+
+  include_dirs = [
+    "${chip_root}/examples/bridge-app/linux/include",
+  ]
+
+  output_dir = root_out_dir
+}
+
+group("default") {
+  deps = [ ":wemo-bridge-app" ]
+}

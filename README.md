@@ -13,19 +13,16 @@ Matter bridge application for exposing legacy WeMo devices as Matter endpoints.
 - `config/`: runtime config examples
 - `.github/workflows/`: CI skeleton
 
-## Dependency model (recommended)
-- `connectedhomeip` pinned by commit via submodule at `third_party/connectedhomeip`
-- `openwemo-bridge-core` consumed as package/submodule
+## Dependency model
+- Use sibling checkout: `../connectedhomeip` (single shared CHIP source tree)
+- `openwemo-bridge-core` consumed from `../openwemo-bridge-core`
 
 ## Quick start
 ```bash
-# 1) initialize submodules (after adding them)
-git submodule update --init --recursive
-
-# 2) configure
+# 1) configure
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
 
-# 3) build
+# 2) build
 cmake --build build -j
 ```
 

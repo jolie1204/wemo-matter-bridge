@@ -6,10 +6,15 @@ if [[ ! -d .git ]]; then
   exit 1
 fi
 
-if [[ -d third_party/connectedhomeip ]]; then
-  echo "third_party/connectedhomeip already exists"
+if [[ -d ../connectedhomeip ]]; then
+  echo "Using sibling connectedhomeip checkout: ../connectedhomeip"
 else
-  git submodule add git@github.com:puffie/connectedhomeip.git third_party/connectedhomeip
+  echo "missing ../connectedhomeip" >&2
+  echo "Clone project-chip/connectedhomeip next to this repo (../connectedhomeip)." >&2
+  exit 1
 fi
 
-echo "Submodules configured. Pin to a specific commit before release."
+if [[ -d matter-bridge-app ]]; then
+  (cd matter-bridge-app && ln -sfn ../../connectedhomeip connectedhomeip && ln -sfn connectedhomeip/build build && ln -sfn connectedhomeip/build_overrides build_overrides)
+  echo "matter-bridge-app symlinks refreshed."
+fi

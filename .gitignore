@@ -1,6 +1,7 @@
 /build/
 /build-openwemo/
 /out/
+/matter-bridge-app/out/
 /.cache/
 *.log
 *.db

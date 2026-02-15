@@ -1,3 +1,0 @@
-[submodule "third_party/connectedhomeip"]
-	path = third_party/connectedhomeip
-	url = git@github.com:puffie/connectedhomeip.git

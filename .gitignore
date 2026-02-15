@@ -4,6 +4,8 @@
 *.log
 *.db
 *.sqlite
+*.sqlite3
+var/
 *.swp
 .vscode/
 .DS_Store

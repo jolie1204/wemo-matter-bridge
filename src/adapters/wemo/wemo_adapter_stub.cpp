@@ -1,15 +1,20 @@
-#include "wemo_bridge/wemo_adapter.h"
+#include "wemo_bridge/wemo_adapter_stub.h"
 
 namespace wemo_bridge {
 
-class WemoAdapterStub final : public WemoAdapter
+std::vector<WemoDevice> WemoAdapterStub::Discover()
 {
-public:
-    std::vector<WemoDevice> Discover() override { return {}; }
+    return {};
+}
 
-    bool SetOnOff(const std::string &, bool) override { return false; }
+bool WemoAdapterStub::SetOnOff(const std::string &, bool)
+{
+    return false;
+}
 
-    bool SetLevelPercent(const std::string &, uint8_t) override { return false; }
-};
+bool WemoAdapterStub::SetLevelPercent(const std::string &, uint8_t)
+{
+    return false;
+}
 
 } // namespace wemo_bridge

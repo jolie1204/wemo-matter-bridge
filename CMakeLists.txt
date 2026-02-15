@@ -11,12 +11,16 @@ add_executable(wemo-bridge-app
     src/main.cpp
     src/matter/endpoint_registry.cpp
     src/adapters/wemo/wemo_adapter_stub.cpp
+    src/adapters/wemo/wemo_adapter_openwemo.cpp
 )
 
 target_include_directories(wemo-bridge-app
     PRIVATE
         include
 )
+
+find_package(SQLite3 REQUIRED)
+target_link_libraries(wemo-bridge-app PRIVATE SQLite::SQLite3)
 
 # Integration points:
 # - linked CHIP targets from third_party/connectedhomeip

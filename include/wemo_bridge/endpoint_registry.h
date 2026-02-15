@@ -12,7 +12,7 @@ public:
     explicit EndpointRegistry(std::string path);
 
     std::optional<uint16_t> Lookup(const std::string & udn) const;
-    uint16_t GetOrAssign(const std::string & udn);
+    std::optional<uint16_t> GetOrAssign(const std::string & udn);
 
 private:
     std::string mPath;

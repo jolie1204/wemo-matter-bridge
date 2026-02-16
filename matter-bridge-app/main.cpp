@@ -49,11 +49,19 @@
 #include "wemo_bridge/wemo_adapter_openwemo.h"
 #include <app/server/Server.h>
 
+#include <app/clusters/identify-server/IdentifyCluster.h>
+#include <app/clusters/identify-server/identify-server.h>
+#include <data-model-providers/codegen/CodegenDataModelProvider.h>
+#include <platform/DefaultTimerDelegate.h>
+
 #include <algorithm>
+#include <array>
 #include <cassert>
 #include <iostream>
+#include <memory>
 #include <optional>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 using namespace chip;
@@ -189,8 +197,16 @@ DeviceOnOff ActionLight4("Action Light 4", "Room 2");
 
 // WeMo bridge adapter talking to wemo_ctrl/openwemo engine.
 wemo_bridge::WemoAdapterOpenWemo gWemoAdapter("127.0.0.1:49153");
-std::optional<std::string> gLight1Udn;
-std::optional<std::string> gLight2Udn;
+
+struct BridgedWemoLight
+{
+    std::string udn;
+    std::unique_ptr<DeviceOnOff> device;
+    std::array<DataVersion, MATTER_ARRAY_SIZE(bridgedLightClusters)> dataVersions {};
+};
+
+std::vector<BridgedWemoLight> gBridgedWemoLights;
+std::unordered_map<DeviceOnOff *, std::string> gWemoDeviceToUdn;
 
 // Setup composed device with two temperature sensors and a power source
 ComposedDevice gComposedDevice("Composed Device", "Bedroom");
@@ -260,6 +276,14 @@ DECLARE_DYNAMIC_ENDPOINT(bridgedComposedDeviceEndpoint, bridgedComposedDeviceClu
 DataVersion gComposedDeviceDataVersions[MATTER_ARRAY_SIZE(bridgedComposedDeviceClusters)];
 DataVersion gComposedTempSensor1DataVersions[MATTER_ARRAY_SIZE(bridgedTempSensorClusters)];
 DataVersion gComposedTempSensor2DataVersions[MATTER_ARRAY_SIZE(bridgedTempSensorClusters)];
+
+// Identify cluster on the aggregator endpoint (endpoint 1).  The ZAP config
+// declares Identify with EXTERNAL_STORAGE attributes, so we need an actual
+// IdentifyCluster instance registered with the codegen data model provider.
+DefaultTimerDelegate sIdentifyTimerDelegate;
+RegisteredServerCluster<Clusters::IdentifyCluster>
+    gIdentifyClusterEp1(Clusters::IdentifyCluster::Config(1, sIdentifyTimerDelegate)
+                            .WithIdentifyType(Clusters::Identify::IdentifyTypeEnum::kNone));
 
 } // namespace
 
@@ -357,52 +381,23 @@ int RemoveDeviceEndpoint(Device * dev)
 
 std::vector<EndpointListInfo> GetEndpointListInfo(chip::EndpointId parentId)
 {
-    std::vector<EndpointListInfo> infoList;
-
-    for (auto room : gRooms)
-    {
-        if (room->getIsVisible())
-        {
-            EndpointListInfo info(room->getEndpointListId(), room->getName(), room->getType());
-            int index = 0;
-            while (index < CHIP_DEVICE_CONFIG_DYNAMIC_ENDPOINT_COUNT)
-            {
-                if ((gDevices[index] != nullptr) && (gDevices[index]->GetParentEndpointId() == parentId))
-                {
-                    std::string location;
-                    if (room->getType() == Actions::EndpointListTypeEnum::kZone)
-                    {
-                        location = gDevices[index]->GetZone();
-                    }
-                    else
-                    {
-                        location = gDevices[index]->GetLocation();
-                    }
-                    if (room->getName().compare(location) == 0)
-                    {
-                        info.AddEndpointId(gDevices[index]->GetEndpointId());
-                    }
-                }
-                index++;
-            }
-            if (info.GetEndpointListSize() > 0)
-            {
-                infoList.push_back(info);
-            }
-        }
-    }
-
-    return infoList;
+    // This bridge currently does not expose the Actions cluster model to controllers.
+    // Returning empty lists avoids touching dynamic endpoint internals that are not
+    // needed for WeMo OnOff bridging.
+    (void) parentId;
+    return {};
 }
 
 std::vector<Action *> GetActionListInfo(chip::EndpointId parentId)
 {
-    return gActions;
+    (void) parentId;
+    return {};
 }
 
 std::vector<Room *> GetRoomListInfo(chip::EndpointId parentId)
 {
-    return gRooms;
+    (void) parentId;
+    return {};
 }
 
 namespace {
@@ -557,14 +552,10 @@ Protocols::InteractionModel::Status HandleWriteOnOffAttribute(DeviceOnOff * dev,
     {
         const bool targetOn = (*buffer != 0);
 
-        // Forward bridged OnOff writes to WeMo for endpoints bound to real devices.
-        if (dev == &Light1 && gLight1Udn.has_value())
+        auto udnIt = gWemoDeviceToUdn.find(dev);
+        if (udnIt != gWemoDeviceToUdn.end())
         {
-            VerifyOrReturnValue(gWemoAdapter.SetOnOff(gLight1Udn.value(), targetOn), Protocols::InteractionModel::Status::Failure);
-        }
-        else if (dev == &Light2 && gLight2Udn.has_value())
-        {
-            VerifyOrReturnValue(gWemoAdapter.SetOnOff(gLight2Udn.value(), targetOn), Protocols::InteractionModel::Status::Failure);
+            VerifyOrReturnValue(gWemoAdapter.SetOnOff(udnIt->second, targetOn), Protocols::InteractionModel::Status::Failure);
         }
 
         if (targetOn)
@@ -964,54 +955,55 @@ void * bridge_polling_thread(void * context)
     return nullptr;
 }
 
-void ApplicationInit()
+namespace {
+void SyncBridgedWemoStates()
 {
-    auto bindLight = [](DeviceOnOff & light, std::optional<std::string> & udnSlot, const wemo_bridge::WemoDevice & dev) {
-        udnSlot = dev.udn;
-        light.SetName(dev.friendly_name.empty() ? "WeMo Device" : dev.friendly_name.c_str());
-        light.SetOnOff(dev.onoff != 0);
-        light.SetReachable(dev.is_online);
-    };
-
     const auto discovered = gWemoAdapter.Discover();
-    const auto diningIt   = std::find_if(discovered.begin(), discovered.end(), [](const wemo_bridge::WemoDevice & d) {
-        return d.friendly_name == "Dining";
-    });
-
-    if (diningIt != discovered.end())
-    {
-        bindLight(Light1, gLight1Udn, *diningIt);
-    }
-
+    std::unordered_map<std::string, wemo_bridge::WemoDevice> byUdn;
+    byUdn.reserve(discovered.size());
     for (const auto & dev : discovered)
     {
-        if (gLight1Udn.has_value() && dev.udn == gLight1Udn.value())
-        {
-            continue;
-        }
-        if (!gLight1Udn.has_value())
-        {
-            bindLight(Light1, gLight1Udn, dev);
-            continue;
-        }
-        if (!gLight2Udn.has_value())
-        {
-            bindLight(Light2, gLight2Udn, dev);
-            break;
-        }
+        byUdn[dev.udn] = dev;
     }
 
-    if (gLight1Udn.has_value())
+    DeviceLayer::StackLock lock;
+    for (auto & entry : gBridgedWemoLights)
     {
-        ChipLogProgress(DeviceLayer, "WeMo bind: Light1 <- %s", gLight1Udn.value().c_str());
+        auto * light = entry.device.get();
+        auto it      = byUdn.find(entry.udn);
+        const bool isOnline = (it != byUdn.end()) ? it->second.is_online : false;
+
+        light->SetReachable(isOnline);
+        if (isOnline)
+        {
+            light->SetOnOff(it->second.onoff != 0);
+            if (!it->second.friendly_name.empty())
+            {
+                light->SetName(it->second.friendly_name.c_str());
+            }
+        }
     }
-    if (gLight2Udn.has_value())
+}
+
+void * wemo_sync_thread(void * context)
+{
+    while (true)
     {
-        ChipLogProgress(DeviceLayer, "WeMo bind: Light2 <- %s", gLight2Udn.value().c_str());
+        SyncBridgedWemoStates();
+        sleep(3);
     }
+    return nullptr;
+}
+} // namespace
+
+void ApplicationInit()
+{
+    const auto discovered = gWemoAdapter.Discover();
 
     // Clear out the device database
     memset(gDevices, 0, sizeof(gDevices));
+    gBridgedWemoLights.clear();
+    gWemoDeviceToUdn.clear();
 
     // Keep symbols referenced even when mock/action/temp endpoints are not published.
     (void) gActionLight1DataVersions;
@@ -1026,18 +1018,6 @@ void ApplicationInit()
     (void) gComposedTempSensor1DataVersions;
     (void) gComposedTempSensor2DataVersions;
 
-    // Configure only bridged WeMo endpoints.
-    Light1.SetChangeCallback(&HandleDeviceOnOffStatusChanged);
-    Light2.SetChangeCallback(&HandleDeviceOnOffStatusChanged);
-    if (!gLight1Udn.has_value())
-    {
-        Light1.SetReachable(false);
-    }
-    if (!gLight2Udn.has_value())
-    {
-        Light2.SetReachable(false);
-    }
-
     // Set starting endpoint id where dynamic endpoints will be assigned, which
     // will be the next consecutive endpoint id after the last fixed endpoint.
     gFirstDynamicEndpointId = static_cast<chip::EndpointId>(
@@ -1048,30 +1028,60 @@ void ApplicationInit()
     // supported clusters so that ZAP will generated the requisite code.
     emberAfEndpointEnableDisable(emberAfEndpointFromIndex(static_cast<uint16_t>(emberAfFixedEndpointCount() - 1)), false);
 
-    // Publish only discovered WeMo lights.
+    // Publish discovered WeMo lights up to dynamic endpoint capacity.
+    const size_t endpointCapacity = CHIP_DEVICE_CONFIG_DYNAMIC_ENDPOINT_COUNT;
+    gBridgedWemoLights.reserve(std::min(discovered.size(), endpointCapacity));
+
+    for (const auto & dev : discovered)
+    {
+        if (gBridgedWemoLights.size() >= endpointCapacity)
+        {
+            ChipLogError(DeviceLayer, "Skipping WeMo device %s: dynamic endpoint capacity reached (%zu)", dev.friendly_name.c_str(),
+                         endpointCapacity);
+            continue;
+        }
+
+        BridgedWemoLight bridged;
+        bridged.udn = dev.udn;
+        const std::string name = dev.friendly_name.empty() ? std::string("WeMo Device") : dev.friendly_name;
+        bridged.device         = std::make_unique<DeviceOnOff>(name.c_str(), "WeMo");
+        // Seed initial state before callbacks are attached so we do not emit
+        // attribute reports on endpoint 0 before endpoint assignment.
+        bridged.device->SetOnOff(dev.onoff != 0);
+        bridged.device->SetReachable(dev.is_online);
+        ChipLogProgress(DeviceLayer, "WeMo bind: %s <- %s", name.c_str(), bridged.udn.c_str());
+
 #if !CHIP_CONFIG_USE_ENDPOINT_UNIQUE_ID
-    if (gLight1Udn.has_value())
-    {
-        AddDeviceEndpoint(&Light1, &bridgedLightEndpoint, Span<const EmberAfDeviceType>(gBridgedOnOffDeviceTypes),
-                          Span<DataVersion>(gLight1DataVersions), 1);
-    }
-    if (gLight2Udn.has_value())
-    {
-        AddDeviceEndpoint(&Light2, &bridgedLightEndpoint, Span<const EmberAfDeviceType>(gBridgedOnOffDeviceTypes),
-                          Span<DataVersion>(gLight2DataVersions), 1);
-    }
+        const int addedIndex = AddDeviceEndpoint(bridged.device.get(), &bridgedLightEndpoint,
+                                                 Span<const EmberAfDeviceType>(gBridgedOnOffDeviceTypes),
+                                                 Span<DataVersion>(bridged.dataVersions), 1);
 #else
-    if (gLight1Udn.has_value())
-    {
-        AddDeviceEndpoint(&Light1, &bridgedLightEndpoint, Span<const EmberAfDeviceType>(gBridgedOnOffDeviceTypes),
-                          Span<DataVersion>(gLight1DataVersions), ""_span, 1);
-    }
-    if (gLight2Udn.has_value())
-    {
-        AddDeviceEndpoint(&Light2, &bridgedLightEndpoint, Span<const EmberAfDeviceType>(gBridgedOnOffDeviceTypes),
-                          Span<DataVersion>(gLight2DataVersions), ""_span, 1);
-    }
+        const int addedIndex = AddDeviceEndpoint(bridged.device.get(), &bridgedLightEndpoint,
+                                                 Span<const EmberAfDeviceType>(gBridgedOnOffDeviceTypes),
+                                                 Span<DataVersion>(bridged.dataVersions), ""_span, 1);
 #endif
+        if (addedIndex < 0)
+        {
+            ChipLogError(DeviceLayer, "Failed to publish WeMo device %s (udn=%s)", name.c_str(), bridged.udn.c_str());
+            continue;
+        }
+
+        bridged.device->SetChangeCallback(&HandleDeviceOnOffStatusChanged);
+        gWemoDeviceToUdn[bridged.device.get()] = bridged.udn;
+        gBridgedWemoLights.push_back(std::move(bridged));
+    }
+
+    pthread_t wemo_poll_thread;
+    const int pollThreadRes = pthread_create(&wemo_poll_thread, nullptr, wemo_sync_thread, nullptr);
+    if (pollThreadRes == 0)
+    {
+        pthread_detach(wemo_poll_thread);
+    }
+    else
+    {
+        ChipLogError(DeviceLayer, "Failed to start wemo sync thread: %d", pollThreadRes);
+    }
+
     gRooms.clear();
     gActions.clear();
 
@@ -1084,6 +1094,11 @@ void ApplicationInit()
     }
 
     AttributeAccessInterfaceRegistry::Instance().Register(&gPowerAttrAccess);
+
+    // Register the Identify cluster on the aggregator endpoint so attribute
+    // reads are served by the IdentifyCluster implementation instead of falling
+    // through to the external-attribute callback (which does not handle it).
+    VerifyOrDie(CodegenDataModelProvider::Instance().Registry().Register(gIdentifyClusterEp1.Registration()) == CHIP_NO_ERROR);
 }
 
 void ApplicationShutdown() {}

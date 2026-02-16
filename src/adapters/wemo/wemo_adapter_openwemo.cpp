@@ -4,6 +4,7 @@
 #include <unistd.h>
 
 #include <algorithm>
+#include <cstdio>
 #include <cstdlib>
 #include <filesystem>
 #include <mutex>
@@ -13,11 +14,18 @@
 #include <vector>
 
 #if HAVE_OPENWEMO_ENGINE
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wshadow"
+#endif
 extern "C" {
 #define export we_export_param
 #include "wemo_engine.h"
 #undef export
 }
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
 #endif
 
 namespace wemo_bridge {
@@ -240,29 +248,49 @@ void MaybeConfigureIpcTarget(const std::string & engine_socket)
 
 bool EnsureEngineInitialized(const std::string & engine_socket)
 {
-    static std::once_flag init_once;
+    static std::mutex init_lock;
+    static bool target_configured = false;
     static bool initialized = false;
 
-    std::call_once(init_once, [&]() {
+    std::lock_guard<std::mutex> lock(init_lock);
+    if (initialized)
+    {
+        return true;
+    }
+
+    if (!target_configured)
+    {
         MaybeConfigureIpcTarget(engine_socket);
-        initialized = (we_init() == 0);
-    });
+        target_configured = true;
+    }
+
+    initialized = (we_init() != 0);
+    if (!initialized)
+    {
+        std::fprintf(stderr, "wemo_adapter: we_init failed (socket=%s)\n", engine_socket.c_str());
+    }
 
     return initialized;
 }
 
 bool SendState(int wemo_id, int state, int level)
 {
+    constexpr int kCommandConfirmTimeoutMs = 2500;
+
     struct we_state target {};
     target.state     = state;
     target.level     = level;
     target.is_online = 1;
 
-    if (we_set_action_confirmed(wemo_id, &target, 8000) == 0)
+    const int rc_confirm = we_set_action_confirmed(wemo_id, &target, kCommandConfirmTimeoutMs);
+    std::fprintf(stderr, "wemo_adapter: set_confirmed wemo_id=%d state=%d level=%d rc=%d\n", wemo_id, state, level, rc_confirm);
+    if (rc_confirm == 0)
     {
         return true;
     }
-    return we_set_action(wemo_id, &target) == 0;
+    const int rc_set = we_set_action(wemo_id, &target);
+    std::fprintf(stderr, "wemo_adapter: set_fallback wemo_id=%d state=%d level=%d rc=%d\n", wemo_id, state, level, rc_set);
+    return rc_set != 0;
 }
 #endif
 

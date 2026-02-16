@@ -10,7 +10,9 @@ executable("wemo-bridge-app") {
     "${chip_root}/examples/bridge-app/linux/Device.cpp",
     "${chip_root}/examples/bridge-app/linux/include/Device.h",
     "${chip_root}/examples/bridge-app/linux/include/main.h",
-    "${chip_root}/examples/bridge-app/linux/main.cpp",
+    "main.cpp",
+    "../src/adapters/wemo/wemo_adapter_openwemo.cpp",
+    "../src/matter/endpoint_registry.cpp",
   ]
 
   deps = [
@@ -19,10 +21,34 @@ executable("wemo-bridge-app") {
     "${chip_root}/src/lib",
   ]
 
-  cflags = [ "-Wconversion" ]
+  cflags = [
+    "-Wconversion",
+    "-Wno-shadow",
+  ]
+  defines = [ "HAVE_OPENWEMO_ENGINE=1" ]
 
   include_dirs = [
     "${chip_root}/examples/bridge-app/linux/include",
+    "../include",
+    "../../openwemo-bridge-core/wemo_engine",
+  ]
+
+  lib_dirs = [
+    "../../openwemo-bridge-core/wemo_engine",
+    "/usr/local/lib",
+  ]
+
+  libs = [
+    "wemoengine",
+    "sqlite3",
+    "ixml",
+    "upnp",
+    "pthread",
+  ]
+
+  ldflags = [
+    "-Wl,-rpath,/home/harry/wemo-matter/openwemo-bridge-core/wemo_engine",
+    "-Wl,-rpath,/usr/local/lib",
   ]
 
   output_dir = root_out_dir

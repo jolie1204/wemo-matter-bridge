@@ -2,6 +2,9 @@
 
 Matter bridge application for exposing legacy WeMo devices as Matter endpoints.
 
+This project is intended to help users continue running local WeMo devices after
+cloud/app support loss by exposing those devices to modern Matter controllers.
+
 ## Scope
 - Bridge-only architecture (no firmware flashing or device bootloader changes).
 - Uses WeMo UDN as canonical identity.
@@ -11,7 +14,13 @@ Matter bridge application for exposing legacy WeMo devices as Matter endpoints.
 - `src/`: app sources and adapters
 - `include/`: public headers
 - `config/`: runtime config examples
+- `docs/`: end-user and operator docs
 - `.github/workflows/`: CI skeleton
+
+## Documentation
+- `docs/HOWTO.md`: detailed setup/commissioning/troubleshooting guide
+- `COMPATIBILITY.md`: tested hardware/controller matrix
+- `ROADMAP.md`: project priorities and release strategy
 
 ## Dependency model
 - Use sibling checkout: `../connectedhomeip` (single shared CHIP source tree)

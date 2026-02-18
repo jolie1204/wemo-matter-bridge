@@ -7,7 +7,7 @@ bridged control and reproducible dependency pins.
 
 ### Dependency Pins
 - `wemo-matter-bridge`: `cb9a49676af2c4eb8143beeac3705973a0434c34`
-- `openwemo-bridge-core`: `9e7b63d7eb91198fd1b7a19b2c143a94f4031988`
+- `openwemo-bridge-core`: `4c173e6b15eb487dd75e4da62b2ec358b1677ce4`
 - `connectedhomeip`: `v1.5.0.1` (`8effa808dd9fa195ec0294f0ad67c80a86dd4975`)
 - `pupnp`: `1124f692772f673a0dc8d5371f50c0d334905b1c`
 

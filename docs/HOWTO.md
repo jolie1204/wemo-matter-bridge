@@ -33,6 +33,33 @@ Place repos side-by-side:
 
 `wemo-matter-bridge/matter-bridge-app` expects `../../connectedhomeip`.
 
+### Clean-machine quick start (reproducible)
+```bash
+mkdir -p ~/wemo-stack && cd ~/wemo-stack
+git clone https://github.com/jolie1204/wemo-matter-bridge.git
+git clone https://github.com/jolie1204/openwemo-bridge-core.git
+git clone https://github.com/jolie1204/connectedhomeip.git
+git clone https://github.com/jolie1204/pupnp.git
+```
+
+Check out pinned baselines:
+1. `wemo-matter-bridge`: `v0.1.0`
+2. `openwemo-bridge-core`: `4c173e6b15eb487dd75e4da62b2ec358b1677ce4`
+3. `connectedhomeip`: `v1.5.0.1`
+4. `pupnp`: `1124f692772f673a0dc8d5371f50c0d334905b1c`
+
+Notes:
+1. `matter-bridge-app/build_wemo_bridge.sh` now bootstraps required CHIP
+   submodules for Linux bridge builds on fresh clones.
+2. If your environment does not have `~/wemo-stack/bin/bridge_stack.sh`, use
+   `wemo-matter-bridge/scripts/install_bridge_stack.sh` and systemd services.
+3. If `openwemo-bridge-core` build fails with:
+   `error: too many arguments to function ‘UpnpInit2’`, patch once:
+```bash
+sed -i 's/UpnpInit2(ifname, port, DeviceUDN)/UpnpInit2(ifname, port)/' \
+  ~/wemo-stack/openwemo-bridge-core/wemo_ctrl/wemo_ctrl.c
+```
+
 ### Raspberry Pi deployment note
 You can run this stack on Raspberry Pi. Recommended for reliability:
 1. Prefer wired Ethernet over Wi-Fi when available.

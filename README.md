@@ -58,6 +58,9 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
 cmake --build build -j
 ```
 
+For clean-machine, multi-repo setup (clone, pinned SHAs/tags, build order,
+deploy/start), use `docs/HOWTO.md` -> `Clean-machine quick start`.
+
 ## Automated install/deploy
 Use the installer script to build and deploy `wemo-bridge-app` (and `wemo_ctrl`
 by default) into your workspace `bin/` directory.

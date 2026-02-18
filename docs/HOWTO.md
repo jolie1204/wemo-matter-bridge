@@ -76,7 +76,25 @@ Verify:
    - On/off for switches
    - Level control for dimmers
 
-## 7. Post-Commission Validation
+Detailed app flow:
+1. Google Home -> `+` -> `Set up device` -> `New device`.
+2. Choose `Matter-enabled device`.
+3. Scan QR code (or enter pairing code).
+4. Assign rooms/names, then run quick validation on each room.
+
+## 7. Commission to Apple Home (iPhone)
+1. Ensure Apple Home is set up with a Home hub (HomePod or Apple TV) for stable
+   Matter control.
+2. In Home app on iPhone, tap `+` -> `Add Accessory`.
+3. Scan Matter QR code or enter the setup code manually.
+4. Assign each bridged accessory to room/category.
+5. Validate:
+   - Switches toggle correctly.
+   - Dimmers expose brightness slider and retain user-selected level behavior.
+6. If capabilities are stale after upgrades, remove the bridge accessory from
+   Home app, restart bridge services, and commission again.
+
+## 8. Post-Commission Validation
 Use logs to confirm endpoint binding:
 
 ```bash
@@ -87,7 +105,7 @@ You should see entries like:
 1. `WeMo bind (dimmable): Kitchen <- uuid:Dimmer-...`
 2. `Added device Kitchen to dynamic endpoint ...`
 
-## 8. Troubleshooting by Symptom
+## 9. Troubleshooting by Symptom
 
 ### Symptom A: Devices show offline
 1. Confirm both daemons are running.
@@ -112,7 +130,7 @@ You should see entries like:
 1. Verify bridge logs for synthetic min-level suppression.
 2. Ensure no stale binary is running after rebuild/deploy.
 
-## 9. Upgrade Strategy (Safe)
+## 10. Upgrade Strategy (Safe)
 For each upgrade:
 1. Pin target CHIP SHA.
 2. Build and deploy in maintenance window.
@@ -123,7 +141,7 @@ For each upgrade:
    - restart stack and verify state behavior
 4. Only then mark release as known-good.
 
-## 10. Rollback Strategy
+## 11. Rollback Strategy
 Keep previous known-good binaries and SHAs.
 
 Rollback flow:
@@ -133,7 +151,7 @@ Rollback flow:
 4. Restart stack.
 5. Confirm old behavior returns before further changes.
 
-## 11. Support Bundle for Bug Reports
+## 12. Support Bundle for Bug Reports
 When filing issues, include:
 1. `wemo-matter-bridge` commit SHA
 2. `connectedhomeip` SHA/tag

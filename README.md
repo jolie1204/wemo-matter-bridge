@@ -51,6 +51,29 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
 cmake --build build -j
 ```
 
+## Use with Google Home (Android/iOS)
+1. Start both services and confirm they are running:
+   - `wemo_ctrl`
+   - `wemo-bridge-app`
+2. Open Google Home app and tap `+` -> `Set up device` -> `New device`.
+3. Choose `Matter-enabled device`, then scan bridge QR code or enter setup code.
+4. Assign bridged devices to rooms and test:
+   - Switches: on/off
+   - Dimmers: on/off + brightness slider
+5. If a device type or name looks stale, remove the bridge from Google Home and
+   commission again after restarting the bridge stack.
+
+## Use with Apple Home (iPhone Home app)
+1. Ensure your Apple Home environment is ready for Matter (iPhone Home app and
+   a Home hub such as HomePod/Apple TV on the same home).
+2. Start `wemo_ctrl` and `wemo-bridge-app`.
+3. In Home app, tap `+` -> `Add Accessory` -> scan Matter QR code or enter code.
+4. Complete room assignment, then verify control:
+   - On/off for switches
+   - Brightness control for dimmers
+5. If tiles do not reflect latest capabilities, remove bridge accessory and
+   add it again after restarting the bridge services.
+
 ## Local openwemo integration
 By default, the project builds without linking `openwemo-bridge-core`.
 

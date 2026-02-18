@@ -35,7 +35,8 @@ Place repos side-by-side:
 
 ### Clean-machine quick start (reproducible)
 ```bash
-mkdir -p ~/wemo-stack && cd ~/wemo-stack
+export WORKSPACE="${WORKSPACE:-$HOME/wemo-stack}"
+mkdir -p "$WORKSPACE" && cd "$WORKSPACE"
 git clone https://github.com/jolie1204/wemo-matter-bridge.git
 git clone https://github.com/jolie1204/openwemo-bridge-core.git
 git clone https://github.com/jolie1204/connectedhomeip.git
@@ -51,13 +52,13 @@ Check out pinned baselines:
 Notes:
 1. `matter-bridge-app/build_wemo_bridge.sh` now bootstraps required CHIP
    submodules for Linux bridge builds on fresh clones.
-2. If your environment does not have `~/wemo-stack/bin/bridge_stack.sh`, use
+2. If your environment does not have `$WORKSPACE/bin/bridge_stack.sh`, use
    `wemo-matter-bridge/scripts/install_bridge_stack.sh` and systemd services.
 3. If `openwemo-bridge-core` build fails with:
    `error: too many arguments to function ‘UpnpInit2’`, patch once:
 ```bash
 sed -i 's/UpnpInit2(ifname, port, DeviceUDN)/UpnpInit2(ifname, port)/' \
-  ~/wemo-stack/openwemo-bridge-core/wemo_ctrl/wemo_ctrl.c
+  "$WORKSPACE/openwemo-bridge-core/wemo_ctrl/wemo_ctrl.c"
 ```
 
 ### Raspberry Pi deployment note

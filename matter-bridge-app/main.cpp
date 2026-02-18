@@ -21,6 +21,7 @@
 #include <platform/CHIPDeviceLayer.h>
 #include <platform/PlatformManager.h>
 
+#include <app-common/zap-generated/callback.h>
 #include <app-common/zap-generated/ids/Attributes.h>
 #include <app-common/zap-generated/ids/Clusters.h>
 #include <app/AttributeAccessInterfaceRegistry.h>
@@ -45,6 +46,7 @@
 
 #include "CommissionableInit.h"
 #include "Device.h"
+#include "DeviceDimmable.h"
 #include "main.h"
 #include "wemo_bridge/wemo_adapter_openwemo.h"
 #include <app/server/Server.h>
@@ -57,10 +59,13 @@
 #include <algorithm>
 #include <array>
 #include <cassert>
+#include <cinttypes>
+#include <chrono>
 #include <iostream>
 #include <memory>
 #include <optional>
 #include <string>
+#include <thread>
 #include <unordered_map>
 #include <vector>
 
@@ -112,6 +117,8 @@ const int16_t initialMeasuredValue = 100;
 #define DEVICE_TYPE_BRIDGED_NODE 0x0013
 // (taken from lo-devices.xml)
 #define DEVICE_TYPE_LO_ON_OFF_LIGHT 0x0100
+// (taken from lo-devices.xml)
+#define DEVICE_TYPE_LO_DIMMABLE_LIGHT 0x0101
 // (taken from matter-devices.xml)
 #define DEVICE_TYPE_POWER_SOURCE 0x0011
 // (taken from matter-devices.xml)
@@ -139,7 +146,7 @@ DECLARE_DYNAMIC_ATTRIBUTE(Descriptor::Attributes::DeviceTypeList::Id, ARRAY, kDe
     DECLARE_DYNAMIC_ATTRIBUTE(Descriptor::Attributes::ClientList::Id, ARRAY, kDescriptorAttributeArraySize, 0), /* client list */
     DECLARE_DYNAMIC_ATTRIBUTE(Descriptor::Attributes::PartsList::Id, ARRAY, kDescriptorAttributeArraySize, 0),  /* parts list */
 #if CHIP_CONFIG_USE_ENDPOINT_UNIQUE_ID
-    DECLARE_DYNAMIC_ATTRIBUTE(Descriptor::Attributes::EndpointUniqueID::Id, ARRAY, 32, 0), /* endpoint unique id*/
+    DECLARE_DYNAMIC_ATTRIBUTE(Descriptor::Attributes::EndpointUniqueID::Id, CHAR_STRING, 32, 0), /* endpoint unique id*/
 #endif
     DECLARE_DYNAMIC_ATTRIBUTE_LIST_END();
 
@@ -178,6 +185,44 @@ DECLARE_DYNAMIC_ENDPOINT(bridgedLightEndpoint, bridgedLightClusters);
 DataVersion gLight1DataVersions[MATTER_ARRAY_SIZE(bridgedLightClusters)];
 DataVersion gLight2DataVersions[MATTER_ARRAY_SIZE(bridgedLightClusters)];
 
+// ---------------------------------------------------------------------------
+//
+// DIMMABLE LIGHT ENDPOINT: contains the following clusters:
+//   - On/Off
+//   - Level Control
+//   - Descriptor
+//   - Bridged Device Basic Information
+
+// Declare LevelControl cluster attributes
+DECLARE_DYNAMIC_ATTRIBUTE_LIST_BEGIN(levelControlAttrs)
+DECLARE_DYNAMIC_ATTRIBUTE(LevelControl::Attributes::CurrentLevel::Id, INT8U, 1, 0),  /* CurrentLevel (nullable) */
+    DECLARE_DYNAMIC_ATTRIBUTE(LevelControl::Attributes::MinLevel::Id, INT8U, 1, 0),  /* MinLevel */
+    DECLARE_DYNAMIC_ATTRIBUTE(LevelControl::Attributes::MaxLevel::Id, INT8U, 1, 0),  /* MaxLevel */
+    DECLARE_DYNAMIC_ATTRIBUTE(LevelControl::Attributes::ClusterRevision::Id, INT16U, 2, 0), /* ClusterRevision */
+    DECLARE_DYNAMIC_ATTRIBUTE(LevelControl::Attributes::FeatureMap::Id, BITMAP32, 4, 0),    /* FeatureMap */
+    DECLARE_DYNAMIC_ATTRIBUTE_LIST_END();
+
+constexpr CommandId levelControlIncomingCommands[] = {
+    LevelControl::Commands::MoveToLevel::Id,
+    LevelControl::Commands::Move::Id,
+    LevelControl::Commands::Step::Id,
+    LevelControl::Commands::Stop::Id,
+    LevelControl::Commands::MoveToLevelWithOnOff::Id,
+    LevelControl::Commands::MoveWithOnOff::Id,
+    LevelControl::Commands::StepWithOnOff::Id,
+    LevelControl::Commands::StopWithOnOff::Id,
+    kInvalidCommandId,
+};
+
+DECLARE_DYNAMIC_CLUSTER_LIST_BEGIN(bridgedDimmableLightClusters)
+DECLARE_DYNAMIC_CLUSTER(OnOff::Id, onOffAttrs, ZAP_CLUSTER_MASK(SERVER), onOffIncomingCommands, nullptr),
+    DECLARE_DYNAMIC_CLUSTER(LevelControl::Id, levelControlAttrs, ZAP_CLUSTER_MASK(SERVER), levelControlIncomingCommands, nullptr),
+    DECLARE_DYNAMIC_CLUSTER(Descriptor::Id, descriptorAttrs, ZAP_CLUSTER_MASK(SERVER), nullptr, nullptr),
+    DECLARE_DYNAMIC_CLUSTER(BridgedDeviceBasicInformation::Id, bridgedDeviceBasicAttrs, ZAP_CLUSTER_MASK(SERVER), nullptr,
+                            nullptr) DECLARE_DYNAMIC_CLUSTER_LIST_END;
+
+DECLARE_DYNAMIC_ENDPOINT(bridgedDimmableLightEndpoint, bridgedDimmableLightClusters);
+
 DeviceOnOff Light1("Light 1", "Office");
 DeviceOnOff Light2("Light 2", "Office");
 
@@ -198,15 +243,30 @@ DeviceOnOff ActionLight4("Action Light 4", "Room 2");
 // WeMo bridge adapter talking to wemo_ctrl/openwemo engine.
 wemo_bridge::WemoAdapterOpenWemo gWemoAdapter("127.0.0.1:49153");
 
+// Max cluster count across both endpoint types for DataVersion storage.
+constexpr size_t kMaxBridgedClusters = MATTER_ARRAY_SIZE(bridgedDimmableLightClusters);
+
 struct BridgedWemoLight
 {
+    int wemo_id = 0;
     std::string udn;
-    std::unique_ptr<DeviceOnOff> device;
-    std::array<DataVersion, MATTER_ARRAY_SIZE(bridgedLightClusters)> dataVersions {};
+    bool is_dimmable = false;
+    std::unique_ptr<Device> device;  // DeviceOnOff or DeviceDimmable
+    std::array<DataVersion, kMaxBridgedClusters> dataVersions {};
+
+    // --- Command-echo suppression ---
+    // Keep commanded values for a short settle window so stale post-command
+    // events from wemo_ctrl cannot flip state back.
+    int commandedOnOff = -1;  // -1 = no pending command, 0 = OFF, 1 = ON
+    int commandedLevel = -1;  // -1 = no pending command, 0-254 = level
+    std::chrono::steady_clock::time_point commandedOnOffUntil;
+    std::chrono::steady_clock::time_point commandedLevelUntil;
 };
 
+constexpr auto kCommandSettleWindow = std::chrono::milliseconds(2000);
+
 std::vector<BridgedWemoLight> gBridgedWemoLights;
-std::unordered_map<DeviceOnOff *, std::string> gWemoDeviceToUdn;
+std::unordered_map<Device *, std::string> gWemoDeviceToUdn;
 
 // Setup composed device with two temperature sensors and a power source
 ComposedDevice gComposedDevice("Composed Device", "Bedroom");
@@ -298,6 +358,8 @@ RegisteredServerCluster<Clusters::IdentifyCluster>
 #define ZCL_TEMPERATURE_SENSOR_CLUSTER_REVISION (1u)
 #define ZCL_TEMPERATURE_SENSOR_FEATURE_MAP (0u)
 #define ZCL_POWER_SOURCE_CLUSTER_REVISION (2u)
+#define ZCL_LEVEL_CONTROL_CLUSTER_REVISION (6u)
+#define ZCL_LEVEL_CONTROL_FEATURE_MAP (0x01u) // OnOff feature bit
 
 // ---------------------------------------------------------------------------
 
@@ -441,6 +503,24 @@ void HandleDeviceOnOffStatusChanged(DeviceOnOff * dev, DeviceOnOff::Changed_t it
     }
 }
 
+void HandleDeviceDimmableStatusChanged(DeviceDimmable * dev, DeviceDimmable::Changed_t itemChangedMask)
+{
+    if (itemChangedMask & (DeviceDimmable::kChanged_Reachable | DeviceDimmable::kChanged_Name))
+    {
+        HandleDeviceStatusChanged(static_cast<Device *>(dev), (Device::Changed_t) itemChangedMask);
+    }
+
+    if (itemChangedMask & DeviceOnOff::kChanged_OnOff)
+    {
+        ScheduleReportingCallback(dev, OnOff::Id, OnOff::Attributes::OnOff::Id);
+    }
+
+    if (itemChangedMask & DeviceDimmable::kChanged_Level)
+    {
+        ScheduleReportingCallback(dev, LevelControl::Id, LevelControl::Attributes::CurrentLevel::Id);
+    }
+}
+
 void HandleDevicePowerSourceStatusChanged(DevicePowerSource * dev, DevicePowerSource::Changed_t itemChangedMask)
 {
     using namespace app::Clusters;
@@ -552,19 +632,122 @@ Protocols::InteractionModel::Status HandleWriteOnOffAttribute(DeviceOnOff * dev,
     {
         const bool targetOn = (*buffer != 0);
 
-        auto udnIt = gWemoDeviceToUdn.find(dev);
+        // Update internal state and respond to the controller immediately.
+        // The WeMo IPC is fired asynchronously so it does not block the
+        // Matter event loop (SQLite lookup + TCP roundtrip to wemo_ctrl).
+        dev->SetOnOff(targetOn);
+
+        auto udnIt = gWemoDeviceToUdn.find(static_cast<Device *>(dev));
         if (udnIt != gWemoDeviceToUdn.end())
         {
-            VerifyOrReturnValue(gWemoAdapter.SetOnOff(udnIt->second, targetOn), Protocols::InteractionModel::Status::Failure);
+            const std::string udn = udnIt->second;
+            // Record commanded state so echo events are suppressed until confirmed.
+            for (auto & entry : gBridgedWemoLights)
+            {
+                if (entry.device.get() == static_cast<Device *>(dev))
+                {
+                    entry.commandedOnOff = targetOn ? 1 : 0;
+                    entry.commandedOnOffUntil = std::chrono::steady_clock::now() + kCommandSettleWindow;
+                    break;
+                }
+            }
+            std::thread([udn, targetOn]() { gWemoAdapter.SetOnOff(udn, targetOn); }).detach();
+        }
+    }
+    else
+    {
+        return Protocols::InteractionModel::Status::Failure;
+    }
+
+    return Protocols::InteractionModel::Status::Success;
+}
+
+Protocols::InteractionModel::Status HandleReadLevelControlAttribute(DeviceDimmable * dev, chip::AttributeId attributeId,
+                                                                     uint8_t * buffer, uint16_t maxReadLength)
+{
+    using namespace LevelControl::Attributes;
+
+    ChipLogProgress(DeviceLayer, "HandleReadLevelControlAttribute: attrId=0x%04x, maxReadLength=%d", attributeId, maxReadLength);
+
+    if ((attributeId == CurrentLevel::Id) && (maxReadLength == 1))
+    {
+        *buffer = dev->GetLevel();
+    }
+    else if ((attributeId == MinLevel::Id) && (maxReadLength == 1))
+    {
+        *buffer = 1;
+    }
+    else if ((attributeId == MaxLevel::Id) && (maxReadLength == 1))
+    {
+        *buffer = 254;
+    }
+    else if ((attributeId == ClusterRevision::Id) && (maxReadLength == 2))
+    {
+        uint16_t rev = ZCL_LEVEL_CONTROL_CLUSTER_REVISION;
+        memcpy(buffer, &rev, sizeof(rev));
+    }
+    else if ((attributeId == FeatureMap::Id) && (maxReadLength == 4))
+    {
+        uint32_t featureMap = ZCL_LEVEL_CONTROL_FEATURE_MAP;
+        memcpy(buffer, &featureMap, sizeof(featureMap));
+    }
+    else
+    {
+        return Protocols::InteractionModel::Status::Failure;
+    }
+
+    return Protocols::InteractionModel::Status::Success;
+}
+
+Protocols::InteractionModel::Status HandleWriteLevelControlAttribute(DeviceDimmable * dev, chip::AttributeId attributeId,
+                                                                      uint8_t * buffer)
+{
+    ChipLogProgress(DeviceLayer, "HandleWriteLevelControlAttribute: attrId=0x%04x", attributeId);
+
+    if ((attributeId == LevelControl::Attributes::CurrentLevel::Id) && (dev->IsReachable()))
+    {
+        // Some controllers emit LevelControl writes as part of an OnOff toggle.
+        // Preserve the current brightness in that window; level should only
+        // change when user explicitly changes brightness.
+        for (auto & entry : gBridgedWemoLights)
+        {
+            if (entry.device.get() == static_cast<Device *>(dev))
+            {
+                if (entry.commandedOnOff >= 0 && std::chrono::steady_clock::now() <= entry.commandedOnOffUntil)
+                {
+                    ChipLogProgress(DeviceLayer, "Ignoring transient level write during OnOff settle for %s", dev->GetName());
+                    return Protocols::InteractionModel::Status::Success;
+                }
+                break;
+            }
         }
 
-        if (targetOn)
+        uint8_t matterLevel = *buffer;
+        dev->SetLevel(matterLevel);
+
+        // Convert Matter 0-254 -> WeMo 0-100 and dispatch asynchronously.
+        uint8_t wemoPercent = static_cast<uint8_t>(static_cast<uint16_t>(matterLevel) * 100u / 254u);
+        // Preserve "on" semantics for tiny non-zero Matter levels (e.g. 1),
+        // which would otherwise truncate to 0% and turn the device off.
+        if (matterLevel > 0 && wemoPercent == 0)
         {
-            dev->SetOnOff(true);
+            wemoPercent = 1;
         }
-        else
+        auto udnIt = gWemoDeviceToUdn.find(static_cast<Device *>(dev));
+        if (udnIt != gWemoDeviceToUdn.end())
         {
-            dev->SetOnOff(false);
+            const std::string udn = udnIt->second;
+            // Record commanded level so echo events are suppressed until confirmed.
+            for (auto & entry : gBridgedWemoLights)
+            {
+                if (entry.device.get() == static_cast<Device *>(dev))
+                {
+                    entry.commandedLevel = matterLevel;
+                    entry.commandedLevelUntil = std::chrono::steady_clock::now() + kCommandSettleWindow;
+                    break;
+                }
+            }
+            std::thread([udn, wemoPercent]() { gWemoAdapter.SetLevelPercent(udn, wemoPercent); }).detach();
         }
     }
     else
@@ -657,6 +840,11 @@ Protocols::InteractionModel::Status emberAfExternalAttributeReadCallback(Endpoin
         {
             ret = HandleReadOnOffAttribute(static_cast<DeviceOnOff *>(dev), attributeMetadata->attributeId, buffer, maxReadLength);
         }
+        else if (clusterId == LevelControl::Id)
+        {
+            ret = HandleReadLevelControlAttribute(static_cast<DeviceDimmable *>(dev), attributeMetadata->attributeId, buffer,
+                                                   maxReadLength);
+        }
         else if (clusterId == TemperatureMeasurement::Id)
         {
             ret = HandleReadTempMeasurementAttribute(static_cast<DeviceTempSensor *>(dev), attributeMetadata->attributeId, buffer,
@@ -747,6 +935,10 @@ Protocols::InteractionModel::Status emberAfExternalAttributeWriteCallback(Endpoi
         {
             ret = HandleWriteOnOffAttribute(static_cast<DeviceOnOff *>(dev), attributeMetadata->attributeId, buffer);
         }
+        else if ((dev->IsReachable()) && (clusterId == LevelControl::Id))
+        {
+            ret = HandleWriteLevelControlAttribute(static_cast<DeviceDimmable *>(dev), attributeMetadata->attributeId, buffer);
+        }
         else if ((dev->IsReachable()) && (clusterId == BridgedDeviceBasicInformation::Id))
         {
             ret = HandleWriteBridgedDeviceBasicAttribute(dev, attributeMetadata->attributeId, buffer);
@@ -793,6 +985,9 @@ void runOnOffRoomAction(Room * room, bool actionOn, EndpointId endpointId, uint1
 
 const EmberAfDeviceType gBridgedOnOffDeviceTypes[] = { { DEVICE_TYPE_LO_ON_OFF_LIGHT, DEVICE_VERSION_DEFAULT },
                                                        { DEVICE_TYPE_BRIDGED_NODE, DEVICE_VERSION_DEFAULT } };
+
+const EmberAfDeviceType gBridgedDimmableDeviceTypes[] = { { DEVICE_TYPE_LO_DIMMABLE_LIGHT, DEVICE_VERSION_DEFAULT },
+                                                           { DEVICE_TYPE_BRIDGED_NODE, DEVICE_VERSION_DEFAULT } };
 
 const EmberAfDeviceType gBridgedComposedDeviceTypes[] = { { DEVICE_TYPE_BRIDGED_NODE, DEVICE_VERSION_DEFAULT },
                                                           { DEVICE_TYPE_POWER_SOURCE, DEVICE_VERSION_DEFAULT } };
@@ -956,44 +1151,92 @@ void * bridge_polling_thread(void * context)
 }
 
 namespace {
-void SyncBridgedWemoStates()
-{
-    const auto discovered = gWemoAdapter.Discover();
-    std::unordered_map<std::string, wemo_bridge::WemoDevice> byUdn;
-    byUdn.reserve(discovered.size());
-    for (const auto & dev : discovered)
-    {
-        byUdn[dev.udn] = dev;
-    }
 
-    DeviceLayer::StackLock lock;
+struct WemoEventContext
+{
+    int wemo_id;
+    bool is_online;
+    int state;
+    int level; // 0-100 or -1
+};
+
+void HandleWemoEventOnMatterThread(intptr_t closure)
+{
+    auto * ctx = reinterpret_cast<WemoEventContext *>(closure);
+    const auto now = std::chrono::steady_clock::now();
     for (auto & entry : gBridgedWemoLights)
     {
-        auto * light = entry.device.get();
-        auto it      = byUdn.find(entry.udn);
-        const bool isOnline = (it != byUdn.end()) ? it->second.is_online : false;
-
-        light->SetReachable(isOnline);
-        if (isOnline)
+        if (entry.wemo_id == ctx->wemo_id)
         {
-            light->SetOnOff(it->second.onoff != 0);
-            if (!it->second.friendly_name.empty())
+            auto * dev = entry.device.get();
+
+            // Reachability always updates immediately.
+            if (dev->IsReachable() != ctx->is_online)
             {
-                light->SetName(it->second.friendly_name.c_str());
+                dev->SetReachable(ctx->is_online);
             }
+
+            if (ctx->is_online)
+            {
+                auto * light = static_cast<DeviceOnOff *>(dev);
+                const bool newOn = (ctx->state != 0);
+                const int newOnInt = newOn ? 1 : 0;
+                bool suppressOnOff = false;
+
+                // OnOff: suppress contradictory state events while the command
+                // settle window is active.
+                if (entry.commandedOnOff >= 0)
+                {
+                    if (now > entry.commandedOnOffUntil)
+                    {
+                        entry.commandedOnOff = -1;
+                    }
+                    else if (newOnInt != entry.commandedOnOff)
+                    {
+                        ChipLogProgress(DeviceLayer, "Suppressing echo for %s (got %s, commanded %s)",
+                                        dev->GetName(), newOn ? "ON" : "OFF",
+                                        entry.commandedOnOff ? "ON" : "OFF");
+                        suppressOnOff = true;
+                    }
+                }
+
+                if (!suppressOnOff && light->IsOn() != newOn)
+                {
+                    light->SetOnOff(newOn);
+                }
+
+                if (entry.is_dimmable && ctx->level >= 0)
+                {
+                    auto * dimmer = static_cast<DeviceDimmable *>(dev);
+                    uint8_t matterLevel = static_cast<uint8_t>(static_cast<uint16_t>(ctx->level) * 254u / 100u);
+                    bool suppressLevel = false;
+
+                    if (entry.commandedLevel >= 0)
+                    {
+                        if (now > entry.commandedLevelUntil)
+                        {
+                            entry.commandedLevel = -1;
+                        }
+                        else if (matterLevel != static_cast<uint8_t>(entry.commandedLevel))
+                        {
+                            ChipLogProgress(DeviceLayer, "Suppressing level echo for %s (got %u, commanded %d)",
+                                            dev->GetName(), matterLevel, entry.commandedLevel);
+                            suppressLevel = true;
+                        }
+                    }
+
+                    if (!suppressLevel && dimmer->GetLevel() != matterLevel)
+                    {
+                        dimmer->SetLevel(matterLevel);
+                    }
+                }
+            }
+            break;
         }
     }
+    Platform::Delete(ctx);
 }
 
-void * wemo_sync_thread(void * context)
-{
-    while (true)
-    {
-        SyncBridgedWemoStates();
-        sleep(3);
-    }
-    return nullptr;
-}
 } // namespace
 
 void ApplicationInit()
@@ -1042,45 +1285,114 @@ void ApplicationInit()
         }
 
         BridgedWemoLight bridged;
+        bridged.wemo_id = dev.wemo_id;
         bridged.udn = dev.udn;
+        bridged.is_dimmable = dev.supports_level;
         const std::string name = dev.friendly_name.empty() ? std::string("WeMo Device") : dev.friendly_name;
-        bridged.device         = std::make_unique<DeviceOnOff>(name.c_str(), "WeMo");
-        // Seed initial state before callbacks are attached so we do not emit
-        // attribute reports on endpoint 0 before endpoint assignment.
-        bridged.device->SetOnOff(dev.onoff != 0);
-        bridged.device->SetReachable(dev.is_online);
-        ChipLogProgress(DeviceLayer, "WeMo bind: %s <- %s", name.c_str(), bridged.udn.c_str());
+
+        EmberAfEndpointType * epType;
+        const EmberAfDeviceType * deviceTypes;
+        size_t deviceTypesCount;
+
+        if (dev.supports_level)
+        {
+            auto dimmer = std::make_unique<DeviceDimmable>(name.c_str(), "WeMo");
+            dimmer->SetOnOff(dev.onoff != 0);
+            // Seed level: WeMo 0-100 -> Matter 0-254
+            dimmer->SetLevel(static_cast<uint8_t>(static_cast<uint16_t>(dev.level_percent) * 254u / 100u));
+            dimmer->SetReachable(dev.is_online);
+            bridged.device = std::move(dimmer);
+            epType = &bridgedDimmableLightEndpoint;
+            deviceTypes = gBridgedDimmableDeviceTypes;
+            deviceTypesCount = MATTER_ARRAY_SIZE(gBridgedDimmableDeviceTypes);
+            ChipLogProgress(DeviceLayer, "WeMo bind (dimmable): %s <- %s", name.c_str(), bridged.udn.c_str());
+        }
+        else
+        {
+            auto light = std::make_unique<DeviceOnOff>(name.c_str(), "WeMo");
+            light->SetOnOff(dev.onoff != 0);
+            light->SetReachable(dev.is_online);
+            bridged.device = std::move(light);
+            epType = &bridgedLightEndpoint;
+            deviceTypes = gBridgedOnOffDeviceTypes;
+            deviceTypesCount = MATTER_ARRAY_SIZE(gBridgedOnOffDeviceTypes);
+            ChipLogProgress(DeviceLayer, "WeMo bind (on/off): %s <- %s", name.c_str(), bridged.udn.c_str());
+        }
+
+        // Push into the vector BEFORE registering the endpoint.  The CHIP SDK
+        // stores the DataVersion span pointer for the lifetime of the endpoint,
+        // so it must point into the vector's heap storage (which was pre-reserved
+        // above) rather than into the stack-local `bridged` variable.
+        gBridgedWemoLights.push_back(std::move(bridged));
+        auto & stable = gBridgedWemoLights.back();
+
+        // DataVersion span size must match the cluster count for the endpoint type.
+        const size_t clusterCount = stable.is_dimmable
+            ? MATTER_ARRAY_SIZE(bridgedDimmableLightClusters)
+            : MATTER_ARRAY_SIZE(bridgedLightClusters);
 
 #if !CHIP_CONFIG_USE_ENDPOINT_UNIQUE_ID
-        const int addedIndex = AddDeviceEndpoint(bridged.device.get(), &bridgedLightEndpoint,
-                                                 Span<const EmberAfDeviceType>(gBridgedOnOffDeviceTypes),
-                                                 Span<DataVersion>(bridged.dataVersions), 1);
+        const int addedIndex = AddDeviceEndpoint(stable.device.get(), epType,
+                                                 Span<const EmberAfDeviceType>(deviceTypes, deviceTypesCount),
+                                                 Span<DataVersion>(stable.dataVersions.data(), clusterCount), 1);
 #else
-        const int addedIndex = AddDeviceEndpoint(bridged.device.get(), &bridgedLightEndpoint,
-                                                 Span<const EmberAfDeviceType>(gBridgedOnOffDeviceTypes),
-                                                 Span<DataVersion>(bridged.dataVersions), ""_span, 1);
+        // Use the WeMo UDN as the endpoint unique ID.  Strip the "uuid:"
+        // prefix to fit within the 32-byte buffer.  This gives each bridged
+        // device a stable identity that survives restarts.
+        std::string epUniqueId = stable.udn;
+        if (epUniqueId.rfind("uuid:", 0) == 0)
+        {
+            epUniqueId = epUniqueId.substr(5);
+        }
+        if (epUniqueId.size() > 32)
+        {
+            epUniqueId.resize(32);
+        }
+        CharSpan udnSpan(epUniqueId.c_str(), epUniqueId.size());
+        const int addedIndex = AddDeviceEndpoint(stable.device.get(), epType,
+                                                 Span<const EmberAfDeviceType>(deviceTypes, deviceTypesCount),
+                                                 Span<DataVersion>(stable.dataVersions.data(), clusterCount), udnSpan, 1);
 #endif
         if (addedIndex < 0)
         {
-            ChipLogError(DeviceLayer, "Failed to publish WeMo device %s (udn=%s)", name.c_str(), bridged.udn.c_str());
+            ChipLogError(DeviceLayer, "Failed to publish WeMo device %s (udn=%s)", name.c_str(), stable.udn.c_str());
+            gBridgedWemoLights.pop_back();
             continue;
         }
 
-        bridged.device->SetChangeCallback(&HandleDeviceOnOffStatusChanged);
-        gWemoDeviceToUdn[bridged.device.get()] = bridged.udn;
-        gBridgedWemoLights.push_back(std::move(bridged));
+        if (stable.is_dimmable)
+        {
+            // Dynamic endpoints don't get cluster init functions called
+            // automatically (DECLARE_DYNAMIC_CLUSTER passes NULL for the
+            // functions array).  Manually init the LevelControl server so
+            // its per-endpoint state (minLevel, maxLevel) is set up.
+            emberAfLevelControlClusterServerInitCallback(stable.device->GetEndpointId());
+
+            static_cast<DeviceDimmable *>(stable.device.get())->SetChangeCallback(&HandleDeviceDimmableStatusChanged);
+        }
+        else
+        {
+            static_cast<DeviceOnOff *>(stable.device.get())->SetChangeCallback(&HandleDeviceOnOffStatusChanged);
+        }
+        gWemoDeviceToUdn[stable.device.get()] = stable.udn;
     }
 
-    pthread_t wemo_poll_thread;
-    const int pollThreadRes = pthread_create(&wemo_poll_thread, nullptr, wemo_sync_thread, nullptr);
-    if (pollThreadRes == 0)
-    {
-        pthread_detach(wemo_poll_thread);
-    }
-    else
-    {
-        ChipLogError(DeviceLayer, "Failed to start wemo sync thread: %d", pollThreadRes);
-    }
+    // Receive state events from wemo_ctrl (called from wemo_engine IPC thread).
+    // Dispatch to the Matter event loop to update bridged device state.
+    gWemoAdapter.RegisterStateCallback([](const wemo_bridge::WemoStateEvent & ev) {
+        auto * ctx       = Platform::New<WemoEventContext>();
+        ctx->wemo_id     = ev.wemo_id;
+        ctx->is_online   = ev.is_online;
+        ctx->state       = ev.state;
+        ctx->level       = ev.level;
+        TEMPORARY_RETURN_IGNORED PlatformMgr().ScheduleWork(HandleWemoEventOnMatterThread, reinterpret_cast<intptr_t>(ctx));
+    });
+
+    // Re-trigger SSDP discovery now that the callback is registered.  Events
+    // fired during the initial Discover() call were lost (callback not yet set).
+    // This refresh causes wemo_ctrl to re-probe all devices and deliver fresh
+    // state events, so bridged devices come online quickly after startup.
+    gWemoAdapter.Refresh();
 
     gRooms.clear();
     gActions.clear();

@@ -10,6 +10,7 @@ executable("wemo-bridge-app") {
     "${chip_root}/examples/bridge-app/linux/Device.cpp",
     "${chip_root}/examples/bridge-app/linux/include/Device.h",
     "${chip_root}/examples/bridge-app/linux/include/main.h",
+    "DeviceDimmable.cpp",
     "main.cpp",
     "../src/adapters/wemo/wemo_adapter_openwemo.cpp",
     "../src/matter/endpoint_registry.cpp",
@@ -25,10 +26,20 @@ executable("wemo-bridge-app") {
     "-Wconversion",
     "-Wno-shadow",
   ]
-  defines = [ "HAVE_OPENWEMO_ENGINE=1" ]
+  defines = [
+    "HAVE_OPENWEMO_ENGINE=1",
+    # Advertise this node as an Aggregator for bridge classification.
+    "CHIP_DEVICE_CONFIG_DEVICE_TYPE=0x000E",
+    # Persist CHIP storage under var/chip instead of /tmp.
+    "FATCONFDIR=\"/home/harry/wemo-matter-claude/var/chip\"",
+    "SYSCONFDIR=\"/home/harry/wemo-matter-claude/var/chip\"",
+    "LOCALSTATEDIR=\"/home/harry/wemo-matter-claude/var/chip\"",
+    "CHIP_CONFIG_KVS_PATH=\"/home/harry/wemo-matter-claude/var/chip/chip_kvs\"",
+  ]
 
   include_dirs = [
     "${chip_root}/examples/bridge-app/linux/include",
+    "include",
     "../include",
     "../../openwemo-bridge-core/wemo_engine",
   ]
@@ -47,7 +58,7 @@ executable("wemo-bridge-app") {
   ]
 
   ldflags = [
-    "-Wl,-rpath,/home/harry/wemo-matter/openwemo-bridge-core/wemo_engine",
+    "-Wl,-rpath,/home/harry/wemo-matter-claude/openwemo-bridge-core/wemo_engine",
     "-Wl,-rpath,/usr/local/lib",
   ]
 

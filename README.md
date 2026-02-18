@@ -32,6 +32,7 @@ For multi-repo setup and dependency pinning, start at:
 - `docs/HOWTO.md`: detailed setup/commissioning/troubleshooting guide
 - `COMPATIBILITY.md`: tested hardware/controller matrix
 - `ROADMAP.md`: project priorities and release strategy
+- `docs/RELEASES.md`: versioned release notes and pinned dependency SHAs
 
 ## Search keywords
 We include common migration keywords so people can find this project:

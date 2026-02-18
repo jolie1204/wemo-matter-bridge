@@ -1,14 +1,25 @@
 # wemo-matter-bridge
 
-Matter bridge application for exposing legacy WeMo devices as Matter endpoints.
+Open-source WeMo to Matter bridge for users affected by Belkin WeMo app/cloud
+shutdowns. It exposes legacy WeMo switches and dimmers as Matter endpoints for
+Google Home, Apple Home, and other Matter controllers.
 
-This project is intended to help users continue running local WeMo devices after
-cloud/app support loss by exposing those devices to modern Matter controllers.
+If you are searching for terms like "WeMo discontinued support", "WeMo Google
+Home fix", "Belkin WeMo replacement", or "WeMo Matter bridge", this repository
+is the bridge implementation.
+
+For multi-repo setup and dependency pinning, start at:
+`https://github.com/jolie1204/wemo-bridge-stack`
 
 ## Scope
 - Bridge-only architecture (no firmware flashing or device bootloader changes).
 - Uses WeMo UDN as canonical identity.
 - Persists `UDN -> endpointId` for endpoint stability.
+
+## Who this helps
+- Existing Belkin WeMo device owners who want local control after service loss.
+- Users migrating WeMo devices into Matter ecosystems.
+- Home setups where WeMo devices appear offline in cloud-only app flows.
 
 ## Repository layout
 - `src/`: app sources and adapters
@@ -21,6 +32,11 @@ cloud/app support loss by exposing those devices to modern Matter controllers.
 - `docs/HOWTO.md`: detailed setup/commissioning/troubleshooting guide
 - `COMPATIBILITY.md`: tested hardware/controller matrix
 - `ROADMAP.md`: project priorities and release strategy
+
+## Search keywords
+We include common migration keywords so people can find this project:
+`WeMo end of support`, `Belkin WeMo migration`, `WeMo offline fix`,
+`WeMo dimmer Matter`, `Google Home WeMo replacement`, `open source WeMo bridge`.
 
 ## Dependency model
 - Use sibling checkout: `../connectedhomeip` (single shared CHIP source tree)

@@ -68,6 +68,31 @@ Useful options:
 ./scripts/install_bridge_stack.sh --skip-openwemo-build
 ```
 
+## Auto-restart with systemd
+Service templates are included:
+- `scripts/systemd/wemo-ctrl.service`
+- `scripts/systemd/wemo-bridge-app.service`
+- env template: `config/wemo-bridge.env.example`
+
+Typical setup (root):
+```bash
+sudo mkdir -p /etc/wemo-bridge
+sudo cp config/wemo-bridge.env.example /etc/wemo-bridge/wemo-bridge.env
+# edit paths in /etc/wemo-bridge/wemo-bridge.env
+
+sudo cp scripts/systemd/wemo-ctrl.service /etc/systemd/system/
+sudo cp scripts/systemd/wemo-bridge-app.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now wemo-ctrl.service wemo-bridge-app.service
+sudo systemctl status wemo-ctrl.service wemo-bridge-app.service
+```
+
+Health check:
+```bash
+./scripts/wemo_bridge_health.sh
+./scripts/wemo_bridge_health.sh --systemd
+```
+
 ## Use with Google Home (Android/iOS)
 1. Start both services and confirm they are running:
    - `wemo_ctrl`

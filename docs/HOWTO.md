@@ -75,6 +75,31 @@ Common variants:
 ./scripts/install_bridge_stack.sh --skip-openwemo-build
 ```
 
+### 4.4 Optional: install systemd services for auto-restart
+Service templates in this repo:
+1. `scripts/systemd/wemo-ctrl.service`
+2. `scripts/systemd/wemo-bridge-app.service`
+3. `config/wemo-bridge.env.example`
+
+Install (requires root):
+```bash
+sudo mkdir -p /etc/wemo-bridge
+sudo cp config/wemo-bridge.env.example /etc/wemo-bridge/wemo-bridge.env
+# edit /etc/wemo-bridge/wemo-bridge.env to match your install paths
+
+sudo cp scripts/systemd/wemo-ctrl.service /etc/systemd/system/
+sudo cp scripts/systemd/wemo-bridge-app.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now wemo-ctrl.service wemo-bridge-app.service
+sudo systemctl status wemo-ctrl.service wemo-bridge-app.service
+```
+
+Health checks:
+```bash
+./scripts/wemo_bridge_health.sh
+./scripts/wemo_bridge_health.sh --systemd
+```
+
 ## 5. Deploy and Start
 
 If your environment includes a helper script (for example `bin/bridge_stack.sh`):

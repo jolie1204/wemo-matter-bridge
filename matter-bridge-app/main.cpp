@@ -54,7 +54,7 @@
 #include <app/clusters/identify-server/IdentifyCluster.h>
 #include <app/clusters/identify-server/identify-server.h>
 #include <data-model-providers/codegen/CodegenDataModelProvider.h>
-#include <platform/DefaultTimerDelegate.h>
+#include <app/DefaultTimerDelegate.h>
 
 #include <algorithm>
 #include <array>
@@ -1260,7 +1260,14 @@ void HandleWemoEventOnMatterThread(intptr_t closure)
 
 void ApplicationInit()
 {
-    const auto discovered = gWemoAdapter.Discover();
+    auto discovered = gWemoAdapter.Discover();
+    std::sort(discovered.begin(), discovered.end(), [](const auto & a, const auto & b) {
+        if (a.udn != b.udn)
+        {
+            return a.udn < b.udn;
+        }
+        return a.friendly_name < b.friendly_name;
+    });
 
     // Clear out the device database
     memset(gDevices, 0, sizeof(gDevices));
@@ -1268,6 +1275,8 @@ void ApplicationInit()
     gWemoDeviceToUdn.clear();
 
     // Keep symbols referenced even when mock/action/temp endpoints are not published.
+    (void) gLight1DataVersions;
+    (void) gLight2DataVersions;
     (void) gActionLight1DataVersions;
     (void) gActionLight2DataVersions;
     (void) gActionLight3DataVersions;

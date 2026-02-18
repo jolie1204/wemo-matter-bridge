@@ -9,6 +9,18 @@ if [[ ! -d connectedhomeip ]]; then
 fi
 
 CHIP_ROOT="$(cd ../../connectedhomeip && pwd -P)"
+PATCH_FILE="$(pwd -P)/patches/connectedhomeip/unit-localization-startup.patch"
+
+if [[ -f "$PATCH_FILE" ]]; then
+  if git -C "$CHIP_ROOT" apply --check "$PATCH_FILE" >/dev/null 2>&1; then
+    echo "Applying local CHIP patch: unit-localization-startup.patch"
+    git -C "$CHIP_ROOT" apply "$PATCH_FILE"
+  elif git -C "$CHIP_ROOT" apply --reverse --check "$PATCH_FILE" >/dev/null 2>&1; then
+    echo "CHIP patch already present: unit-localization-startup.patch"
+  else
+    echo "WARNING: CHIP patch not applicable for this connectedhomeip revision; skipping: unit-localization-startup.patch" >&2
+  fi
+fi
 
 HOME=/tmp /bin/bash "${CHIP_ROOT}/scripts/examples/gn_build_example.sh" . out/ethernet
 

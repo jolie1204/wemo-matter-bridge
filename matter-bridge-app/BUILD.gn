@@ -3,6 +3,16 @@ import("${chip_root}/build/chip/tools.gni")
 
 assert(chip_build_tools)
 
+wemo_chip_state_dir = getenv("WEMO_CHIP_STATE_DIR")
+if (wemo_chip_state_dir == "") {
+  wemo_chip_state_dir = "/tmp/wemo-bridge/chip"
+}
+
+wemo_engine_rpath = getenv("WEMO_ENGINE_RPATH")
+if (wemo_engine_rpath == "") {
+  wemo_engine_rpath = "$ORIGIN"
+}
+
 executable("wemo-bridge-app") {
   sources = [
     "${chip_root}/examples/bridge-app/bridge-common/include/CHIPProjectAppConfig.h",
@@ -31,11 +41,11 @@ executable("wemo-bridge-app") {
     "HAVE_OPENWEMO_ENGINE=1",
     # Advertise this node as an Aggregator for bridge classification.
     "CHIP_DEVICE_CONFIG_DEVICE_TYPE=0x000E",
-    # Persist CHIP storage under var/chip instead of /tmp.
-    "FATCONFDIR=\"/home/harry/wemo-matter-claude/var/chip\"",
-    "SYSCONFDIR=\"/home/harry/wemo-matter-claude/var/chip\"",
-    "LOCALSTATEDIR=\"/home/harry/wemo-matter-claude/var/chip\"",
-    "CHIP_CONFIG_KVS_PATH=\"/home/harry/wemo-matter-claude/var/chip/chip_kvs\"",
+    # Persist CHIP storage in configurable path; defaults to /tmp/wemo-bridge/chip.
+    "FATCONFDIR=\"" + wemo_chip_state_dir + "\"",
+    "SYSCONFDIR=\"" + wemo_chip_state_dir + "\"",
+    "LOCALSTATEDIR=\"" + wemo_chip_state_dir + "\"",
+    "CHIP_CONFIG_KVS_PATH=\"" + wemo_chip_state_dir + "/chip_kvs\"",
   ]
 
   include_dirs = [
@@ -59,7 +69,7 @@ executable("wemo-bridge-app") {
   ]
 
   ldflags = [
-    "-Wl,-rpath,/home/harry/wemo-matter-claude/openwemo-bridge-core/wemo_engine",
+    "-Wl,-rpath," + wemo_engine_rpath,
     "-Wl,-rpath,/usr/local/lib",
   ]
 

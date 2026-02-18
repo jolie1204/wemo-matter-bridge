@@ -53,6 +53,28 @@ Notes:
 ### 4.2 Build `wemo_ctrl`
 Build from `openwemo-bridge-core` using its documented build steps.
 
+### 4.3 One-command build and deploy (recommended)
+From `wemo-matter-bridge` repo root:
+
+```bash
+./scripts/install_bridge_stack.sh
+```
+
+This script:
+1. Builds `wemo-bridge-app`
+2. Builds `openwemo-bridge-core` (`wemo_ctrl`) by default
+3. Copies binaries into `<workspace>/bin`
+4. Restarts stack via `<workspace>/bin/bridge_stack.sh` when present
+
+Common variants:
+```bash
+# do not restart services
+./scripts/install_bridge_stack.sh --no-restart
+
+# only rebuild and deploy bridge app
+./scripts/install_bridge_stack.sh --skip-openwemo-build
+```
+
 ## 5. Deploy and Start
 
 If your environment includes a helper script (for example `bin/bridge_stack.sh`):

@@ -51,6 +51,23 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
 cmake --build build -j
 ```
 
+## Automated install/deploy
+Use the installer script to build and deploy `wemo-bridge-app` (and `wemo_ctrl`
+by default) into your workspace `bin/` directory.
+
+```bash
+./scripts/install_bridge_stack.sh
+```
+
+Useful options:
+```bash
+# install without restarting bridge_stack.sh
+./scripts/install_bridge_stack.sh --no-restart
+
+# only rebuild/deploy wemo-bridge-app
+./scripts/install_bridge_stack.sh --skip-openwemo-build
+```
+
 ## Use with Google Home (Android/iOS)
 1. Start both services and confirm they are running:
    - `wemo_ctrl`
@@ -82,7 +99,7 @@ Enable real engine control APIs:
 cmake -S . -B build \
   -DCMAKE_BUILD_TYPE=Debug \
   -DWEMO_BRIDGE_USE_OPENWEMO_CORE=ON \
-  -DOPENWEMO_BRIDGE_CORE_ROOT=/home/harry/wemo-matter/openwemo-bridge-core
+  -DOPENWEMO_BRIDGE_CORE_ROOT=<workspace>/openwemo-bridge-core
 cmake --build build -j
 ```
 

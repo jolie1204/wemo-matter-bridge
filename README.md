@@ -36,6 +36,7 @@ with `systemd` (see below) so they recover automatically after reboot.
 
 ## Documentation
 - `docs/HOWTO.md`: detailed setup/commissioning/troubleshooting guide
+- `docs/CODEX_SETUP.md`: codex-friendly deterministic setup runbook
 - `COMPATIBILITY.md`: tested hardware/controller matrix
 - `ROADMAP.md`: project priorities and release strategy
 - `docs/RELEASES.md`: versioned release notes and pinned dependency SHAs

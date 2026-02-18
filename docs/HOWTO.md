@@ -33,6 +33,13 @@ Place repos side-by-side:
 
 `wemo-matter-bridge/matter-bridge-app` expects `../../connectedhomeip`.
 
+### Raspberry Pi deployment note
+You can run this stack on Raspberry Pi. Recommended for reliability:
+1. Prefer wired Ethernet over Wi-Fi when available.
+2. Use `systemd` units (`wemo-ctrl.service`, `wemo-bridge-app.service`) so both
+   daemons survive reboot and transient failures.
+3. On Pi Zero-class hardware, expect slower builds and discovery bursts.
+
 ## 4. Build Steps
 
 ### 4.1 Build `wemo-bridge-app` (Matter bridge)

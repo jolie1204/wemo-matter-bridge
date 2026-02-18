@@ -21,6 +21,12 @@ For multi-repo setup and dependency pinning, start at:
 - Users migrating WeMo devices into Matter ecosystems.
 - Home setups where WeMo devices appear offline in cloud-only app flows.
 
+## Raspberry Pi note
+This stack runs well on Raspberry Pi (for example Pi 4/5, and Pi Zero-class
+devices with lower performance expectations). For best stability, use wired
+Ethernet when possible, keep a fixed IP for the bridge host, and run services
+with `systemd` (see below) so they recover automatically after reboot.
+
 ## Repository layout
 - `src/`: app sources and adapters
 - `include/`: public headers

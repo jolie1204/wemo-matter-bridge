@@ -146,7 +146,7 @@ DECLARE_DYNAMIC_ATTRIBUTE(Descriptor::Attributes::DeviceTypeList::Id, ARRAY, kDe
     DECLARE_DYNAMIC_ATTRIBUTE(Descriptor::Attributes::ClientList::Id, ARRAY, kDescriptorAttributeArraySize, 0), /* client list */
     DECLARE_DYNAMIC_ATTRIBUTE(Descriptor::Attributes::PartsList::Id, ARRAY, kDescriptorAttributeArraySize, 0),  /* parts list */
 #if CHIP_CONFIG_USE_ENDPOINT_UNIQUE_ID
-    DECLARE_DYNAMIC_ATTRIBUTE(Descriptor::Attributes::EndpointUniqueID::Id, CHAR_STRING, 32, 0), /* endpoint unique id*/
+    DECLARE_DYNAMIC_ATTRIBUTE(Descriptor::Attributes::EndpointUniqueID::Id, ARRAY, 32, 0), /* endpoint unique id*/
 #endif
     DECLARE_DYNAMIC_ATTRIBUTE_LIST_END();
 
@@ -359,7 +359,7 @@ RegisteredServerCluster<Clusters::IdentifyCluster>
 #define ZCL_TEMPERATURE_SENSOR_FEATURE_MAP (0u)
 #define ZCL_POWER_SOURCE_CLUSTER_REVISION (2u)
 #define ZCL_LEVEL_CONTROL_CLUSTER_REVISION (6u)
-#define ZCL_LEVEL_CONTROL_FEATURE_MAP (0x01u) // OnOff feature bit
+#define ZCL_LEVEL_CONTROL_FEATURE_MAP (0x03u) // OnOff + Lighting feature bits
 
 // ---------------------------------------------------------------------------
 
@@ -706,23 +706,42 @@ Protocols::InteractionModel::Status HandleWriteLevelControlAttribute(DeviceDimma
 
     if ((attributeId == LevelControl::Attributes::CurrentLevel::Id) && (dev->IsReachable()))
     {
-        // Some controllers emit LevelControl writes as part of an OnOff toggle.
-        // Preserve the current brightness in that window; level should only
-        // change when user explicitly changes brightness.
+        const auto now = std::chrono::steady_clock::now();
+        const uint8_t matterLevel = *buffer;
+        BridgedWemoLight * matched = nullptr;
+
         for (auto & entry : gBridgedWemoLights)
         {
             if (entry.device.get() == static_cast<Device *>(dev))
             {
-                if (entry.commandedOnOff >= 0 && std::chrono::steady_clock::now() <= entry.commandedOnOffUntil)
-                {
-                    ChipLogProgress(DeviceLayer, "Ignoring transient level write during OnOff settle for %s", dev->GetName());
-                    return Protocols::InteractionModel::Status::Success;
-                }
+                matched = &entry;
                 break;
             }
         }
 
-        uint8_t matterLevel = *buffer;
+        // Some controllers emit LevelControl writes as part of an OnOff toggle.
+        // Preserve the current brightness in that window; level should only
+        // change when user explicitly changes brightness.
+        if (matched != nullptr && matched->commandedOnOff >= 0 && now > matched->commandedOnOffUntil)
+        {
+            matched->commandedOnOff = -1;
+        }
+
+        if (matched != nullptr && matched->commandedOnOff >= 0 && now <= matched->commandedOnOffUntil)
+        {
+            ChipLogProgress(DeviceLayer, "Ignoring transient level write during OnOff settle for %s", dev->GetName());
+            return Protocols::InteractionModel::Status::Success;
+        }
+
+        // Google Home "Off" can generate an internal MoveToLevel(1) before
+        // OnOff=0. Ignore that synthetic min-level write so brightness is
+        // preserved across Off/On toggles.
+        if (matched != nullptr && matched->commandedOnOff < 0 && matterLevel <= 1)
+        {
+            ChipLogProgress(DeviceLayer, "Ignoring synthetic min-level write for %s", dev->GetName());
+            return Protocols::InteractionModel::Status::Success;
+        }
+
         dev->SetLevel(matterLevel);
 
         // Convert Matter 0-254 -> WeMo 0-100 and dispatch asynchronously.

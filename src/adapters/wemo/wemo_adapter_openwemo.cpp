@@ -30,6 +30,8 @@ namespace {
 
 // WEMO_DIMMER = 4 from wemo_engine.h dev_id_t enum
 constexpr int kTypeDimmer = 4;
+constexpr int kListDevicesMaxAttempts = 60;
+constexpr unsigned int kListDevicesRetryDelaySeconds = 2;
 
 #if HAVE_OPENWEMO_ENGINE
 void MaybeConfigureIpcTarget(const std::string & engine_socket)
@@ -118,13 +120,33 @@ std::vector<WemoDevice> WemoAdapterOpenWemo::Discover()
         return devices;
     }
 
-    (void) we_discover(0);
-
     struct we_device_list list {};
-    const int rc = we_list_devices(&list);
+    int rc = WE_STATUS_INTERNAL;
+    for (int attempt = 1; attempt <= kListDevicesMaxAttempts; attempt++)
+    {
+        (void) we_discover(0);
+        rc = we_list_devices(&list);
+        if (rc == WE_STATUS_OK && list.count > 0)
+        {
+            break;
+        }
+
+        std::fprintf(stderr, "wemo_adapter: we_list_devices not ready attempt=%d/%d rc=%d count=%d\n", attempt,
+                     kListDevicesMaxAttempts, rc, list.count);
+        if (attempt < kListDevicesMaxAttempts)
+        {
+            sleep(kListDevicesRetryDelaySeconds);
+        }
+    }
+
     if (rc != WE_STATUS_OK)
     {
-        std::fprintf(stderr, "wemo_adapter: we_list_devices failed rc=%d\n", rc);
+        std::fprintf(stderr, "wemo_adapter: we_list_devices failed after retries rc=%d\n", rc);
+        return devices;
+    }
+    if (list.count <= 0)
+    {
+        std::fprintf(stderr, "wemo_adapter: no WeMo devices discovered after retries\n");
         return devices;
     }
 

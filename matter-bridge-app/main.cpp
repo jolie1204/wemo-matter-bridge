@@ -1405,6 +1405,9 @@ void ApplicationInit()
         gWemoDeviceToUdn[stable.device.get()] = stable.udn;
     }
 
+    ChipLogProgress(DeviceLayer, "WeMo bridge published %zu bridged endpoint(s)", gBridgedWemoLights.size());
+    MatterReportingAttributeChangeCallback(1, Descriptor::Id, Descriptor::Attributes::PartsList::Id);
+
     // Receive state events from wemo_ctrl (called from wemo_engine IPC thread).
     // Dispatch to the Matter event loop to update bridged device state.
     gWemoAdapter.RegisterStateCallback([](const wemo_bridge::WemoStateEvent & ev) {
